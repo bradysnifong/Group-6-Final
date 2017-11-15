@@ -1,0 +1,51 @@
+---
+title: "final project.rmd"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(rtracklayer)
+library(AnnotationHub)
+ah <- AnnotationHub()
+query(ah, c("GM12878", "Tfbs", "UniPk"))
+
+extract.seqs <- function()
+
+#get chip-seq for GM12878 cell line and PAX5 protein
+#arbitrarilly grabbing first experiment 
+gr.chip <- query(ah, c("GM12878", "PAX5","Tfbs", "UniPk"))[[1]]
+if(grepl("hg19", metadata(gr.chip)$`Data Source`)){
+  
+  library("BSgenome.Hsapiens.UCSC.hg19")
+}
+
+#make widths of sequence the same 
+#for now choosing 260 bases
+
+#first subset out small peaks 
+target.peaks <- gr.chip[width(gr.chip) > 250, ]
+
+#get the middle of ranges with more than 250 peaks 
+new.seqs <- target.peaks - round((width(target.peaks) - 250)/2)
+new.seqs <- resize(new.seqs, 250)
+
+#extract sequences 
+seqs <- getSeq(Hsapiens, new.seqs)
+
+#split the peak strings
+seq.chars <- as.character(seqs)
+
+#go through each element and split it into indiviudal bases, make a matrix 
+seq.mat <- matrix(unlist(lapply(seq.chars, strsplit, split = "")), ncol = 250, byrow = TRUE)
+
+
+
+
+
+
+
+
+
+```
