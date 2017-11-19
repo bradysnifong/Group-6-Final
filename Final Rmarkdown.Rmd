@@ -38,14 +38,14 @@ library("BSgenome.Hsapiens.UCSC.hg19")
 extract.seq <- function(exp.data, protein){
   
   #make widths of sequence the same 
-  #for now choosing 250 bases
+  #per paper, use 100 bp
 
   #first subset out small peaks 
-  target.peaks <- exp.data[width(exp.data) > 250, ]
+  target.peaks <- exp.data[width(exp.data) > 100, ]
 
   #get the middle of ranges with more than 250 peaks 
-  new.seqs <- target.peaks - round((width(target.peaks) - 250)/2)
-  new.seqs <- resize(new.seqs, 250)
+  new.seqs <- target.peaks - round((width(target.peaks) - 100)/2)
+  new.seqs <- resize(new.seqs, 100)
   
   #extract sequences 
   seqs <- getSeq(Hsapiens, new.seqs)
