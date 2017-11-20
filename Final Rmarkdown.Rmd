@@ -139,6 +139,10 @@ run.svm <- function(combined.seqs, tf.binding){
   exrep<-getExRep(combined.seqs, mismatch.kern, sparse=FALSE)
   svm.model <- kbsvm(x = exrep[training.obs, ], y = tf.binding[training.obs], kernel = mismatch.kern)
   
+  #pull out feature weights 
+  fw <- svm.model@featureWeights
+  names(fw) <- svm.model@trainingFeatures
+  
   #look at accuracy 
   pred.profile <- predict(svm.model, combined.seqs[test.obs], predProfiles = T)
   svm.predictions <- predict( svm.model, exrep[test.obs, ])
@@ -147,9 +151,14 @@ run.svm <- function(combined.seqs, tf.binding){
   
   #get auc
   rocdata<-computeROCandAUC(svm.decisions, tf.binding[test.obs], unique(tf.binding))
-  return(list(rocdata = rocdata, pred.profile = pred.profile, eval.data = eval.data))
+  return(list(rocdata = rocdata, pred.profile = pred.profile, eval.data = eval.data, fw = fw))
   
 }
+
+test.run <- run.svm(exp.data.list[[1]]$sequences, exp.data.list[[1]]$tf.binding)
+
+#most predictive kmer
+top.kmer <- names(test.run$fw)[test.run$fw == max(abs(test.run$fw))]
 
 #run svm
 library(kebabs)
@@ -209,11 +218,13 @@ plot(pred.profile$predictionProfiles,sel=1,ylim=c(-0.05,0.05))
 ```{r}
 
 #pull in open chromatin data 
-
 gm12878.dnase <- query(ah, c("GM12878", "dnase", "UniPk"))[[1]]
 h1hesc.dnase <- query(ah, c("H1HESC", "dnase", "UniPk"))[[1]]
 hepg2.dnase <- query(ah, c("HEPG2", "dnase", "UniPk"))[[1]]
 k562.dnase <- query(ah, c("k562", "dnase", "UniPk"))[[1]]
+
+
+
 
 
 ```
