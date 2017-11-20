@@ -155,10 +155,7 @@ run.svm <- function(combined.seqs, tf.binding){
   
 }
 
-test.run <- run.svm(exp.data.list[[1]]$sequences, exp.data.list[[1]]$tf.binding)
-
-#most predictive kmer
-top.kmer <- names(test.run$fw)[test.run$fw == max(abs(test.run$fw))]
+#test.run <- run.svm(exp.data.list[[5]]$sequences, exp.data.list[[5]]$tf.binding)
 
 #run svm
 library(kebabs)
@@ -170,6 +167,24 @@ svm.indiv.cell <- bplapply(exp.data.list, function(cell.protein.data){
   
 }, BPPARAM = param)
 names(svm.indiv.cell) <- names(exp.data.list)
+
+#function to pull best kmer 
+best.kmers <- sapply(svm.indiv.cell, function(cell.protein){
+  
+  #grab results
+  fw <- cell.protein$fw
+  
+  #most predictive kmer
+  top.kmer <- names(fw)[fw == max(abs(fw))]
+  return(top.kmer)
+  
+})
+names(best.kmers) <- names(svm.indiv.cell)
+
+#put together histograms 
+
+
+
 
 #then on protein data combined across cell types 
 svm.combined.cell <- bplapply(combined.cell.data.list, function(comb.cell.data){
