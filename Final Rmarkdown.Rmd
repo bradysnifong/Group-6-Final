@@ -182,9 +182,27 @@ best.kmers <- sapply(svm.indiv.cell, function(cell.protein){
 names(best.kmers) <- names(svm.indiv.cell)
 
 #put together histograms 
+fw.df <-function(protein){
+  
+  target.results <- svm.indiv.cell[grep(protein, names(svm.indiv.cell))]
+  cell.names <- gsub(paste0(protein, " "), "", names(svm.indiv.cell)[grep(protein, names(svm.indiv.cell))])
+  fw.lengths <- sapply(target.results, function(x) length(x$fw))
+  stopifnot(length(unique(fw.lengths)) == 1)
+  cell.names <- rep(cell.names, each = unique(fw.lengths))
+  combined <- Reduce(function(...) mapply(c, ...), target.results)
+  plot.df <- data.frame(protein = protein, cell = cell.names, feature_weight = combined$fw)
+  return(plot.df)
+  
+}
 
+jund.fw.data <- fw.df("JUND")
+max.fw.data <- fw.df("MAX")
+usf1.fw.data <- fw.df("USF1")
 
-
+library(ggplot2)
+ggplot(jund.fw.data, aes(x = feature_weight, fill = cell)) + geom_histogram(position = "dodge") + ggtitle("JUND Feature Weights")
+ggplot(max.fw.data, aes(x = feature_weight, fill = cell)) + geom_histogram(position = "dodge") + ggtitle("MAX Feature Weights")
+ggplot(usf1.fw.data, aes(x = feature_weight, fill = cell)) + geom_histogram(position = "dodge") + ggtitle("USF1 Feature Weights")
 
 #then on protein data combined across cell types 
 svm.combined.cell <- bplapply(combined.cell.data.list, function(comb.cell.data){
