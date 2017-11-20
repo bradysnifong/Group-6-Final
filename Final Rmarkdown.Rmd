@@ -140,6 +140,10 @@ run.svm <- function(combined.seqs, tf.binding){
   exrep<-getExRep(combined.seqs, mismatch.kern, sparse=FALSE)
   svm.model <- kbsvm(x = exrep[training.obs, ], y = tf.binding[training.obs], kernel = mismatch.kern)
   
+  #pull out feature weights 
+  fw <- svm.model@featureWeights
+  names(fw) <- svm.model@trainingFeatures
+  
   #look at accuracy 
   pred.profile <- predict(svm.model, combined.seqs[test.obs], predProfiles = T)
   svm.predictions <- predict( svm.model, exrep[test.obs, ])
@@ -148,9 +152,11 @@ run.svm <- function(combined.seqs, tf.binding){
   
   #get auc
   rocdata<-computeROCandAUC(svm.decisions, tf.binding[test.obs], unique(tf.binding))
-  return(list(rocdata = rocdata, pred.profile = pred.profile, eval.data = eval.data))
+  return(list(rocdata = rocdata, pred.profile = pred.profile, eval.data = eval.data, fw = fw))
   
 }
+
+#test.run <- run.svm(exp.data.list[[5]]$sequences, exp.data.list[[5]]$tf.binding)
 
 #run svm
 library(kebabs)
@@ -162,6 +168,42 @@ svm.indiv.cell <- bplapply(exp.data.list, function(cell.protein.data){
   
 }, BPPARAM = param)
 names(svm.indiv.cell) <- names(exp.data.list)
+
+#function to pull best kmer 
+best.kmers <- sapply(svm.indiv.cell, function(cell.protein){
+  
+  #grab results
+  fw <- cell.protein$fw
+  
+  #most predictive kmer
+  top.kmer <- names(fw)[fw == max(abs(fw))]
+  return(top.kmer)
+  
+})
+names(best.kmers) <- names(svm.indiv.cell)
+
+#put together histograms 
+fw.df <-function(protein){
+  
+  target.results <- svm.indiv.cell[grep(protein, names(svm.indiv.cell))]
+  cell.names <- gsub(paste0(protein, " "), "", names(svm.indiv.cell)[grep(protein, names(svm.indiv.cell))])
+  fw.lengths <- sapply(target.results, function(x) length(x$fw))
+  stopifnot(length(unique(fw.lengths)) == 1)
+  cell.names <- rep(cell.names, each = unique(fw.lengths))
+  combined <- Reduce(function(...) mapply(c, ...), target.results)
+  plot.df <- data.frame(protein = protein, cell = cell.names, feature_weight = combined$fw)
+  return(plot.df)
+  
+}
+
+jund.fw.data <- fw.df("JUND")
+max.fw.data <- fw.df("MAX")
+usf1.fw.data <- fw.df("USF1")
+
+library(ggplot2)
+ggplot(jund.fw.data, aes(x = feature_weight, fill = cell)) + geom_histogram(position = "dodge") + ggtitle("JUND Feature Weights")
+ggplot(max.fw.data, aes(x = feature_weight, fill = cell)) + geom_histogram(position = "dodge") + ggtitle("MAX Feature Weights")
+ggplot(usf1.fw.data, aes(x = feature_weight, fill = cell)) + geom_histogram(position = "dodge") + ggtitle("USF1 Feature Weights")
 
 #then on protein data combined across cell types 
 svm.combined.cell <- bplapply(combined.cell.data.list, function(comb.cell.data){
@@ -185,6 +227,10 @@ lapply(names(svm.indiv.cell), function(protein.cell){
   plot(plot.data$rocdata, main = protein.cell ,col="red",lwd=2)
   
 })
+
+
+#save relevant objects 
+save(list = c('svm.indiv.cell', 'svm.combined.cell', 'exp.data.list', 'combined.cell.data.list'), file = "group6.results.RDA") 
 ```
 
 ```{r}
@@ -210,11 +256,13 @@ plot(pred.profile$predictionProfiles,sel=1,ylim=c(-0.05,0.05))
 ```{r}
 
 #pull in open chromatin data 
-#probably ignore this
 gm12878.dnase <- query(ah, c("GM12878", "dnase", "UniPk"))[[1]]
 h1hesc.dnase <- query(ah, c("H1HESC", "dnase", "UniPk"))[[1]]
 hepg2.dnase <- query(ah, c("HEPG2", "dnase", "UniPk"))[[1]]
 k562.dnase <- query(ah, c("k562", "dnase", "UniPk"))[[1]]
+
+
+
 
 
 ```
