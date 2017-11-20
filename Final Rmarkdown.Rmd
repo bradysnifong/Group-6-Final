@@ -10,7 +10,8 @@ library(rtracklayer)
 library(AnnotationHub)
 ah <- AnnotationHub()
 
-#PAX5 binding 
+#PAX5 binding
+#a bunch of different proteins
 pax5.experiments <- query(ah, c("PAX5", "Tfbs", "UniPk"))
 rest.experiments <- query(ah, c("REST", "Tfbs", "UniPk"))
 usf1.experiments <- query(ah, c("USF1", "Tfbs", "UniPk"))
@@ -19,6 +20,7 @@ jund.experiments <- query(ah, c("JUND", "Tfbs", "UniPk"))
 yy1.experiments <- query(ah, c("YY1", "Tfbs", "UniPk"))
 gabpa.experiments <- query(ah, c("GABPA", "Tfbs", "UniPk"))
 
+#pulls summarized experiment for cell line a protein
 get.exp <- function(cell.line, protein){
   
   cell.protein.query <- query(ah, c(cell.line, protein, "Tfbs", "UniPk"))
@@ -105,80 +107,3 @@ run.svm <- function(protein1, protein2, cell.line){
 
 test <- run.svm("JUND", "MAX", "GM12878")
 
-
-#pull down data 
-jund.chip <- get.exp("GM12878", "JUND")
-max.chip <- get.exp("GM12878", "MAX")
-jund.diffs <- setdiff(jund.chip, max.chip)
-max.diffs <- setdiff(max.chip, jund.chip)
-
-#get dfs for jund and max 
-jund.seq <- extract.seq(jund.diffs, "jund")
-max.seq <- extract.seq(max.diffs, "max")
-
-#split into test and training sets
-set.seed(14)
-
-jund.training.rows <- sample(1:nrow(jund.seq), round(nrow(jund.seq)*.8))
-jund.test.rows <- setdiff(1:nrow(jund.seq), jund.training.rows)
-jund.training <- jund.seq[jund.training.rows, ]
-jund.test <- jund.seq[jund.test.rows, ]
-
-max.training.rows <- sample(1:nrow(max.seq), round(nrow(max.seq)*.8))
-max.test.rows <- setdiff(1:nrow(max.seq), max.training.rows)
-max.training <- max.seq[max.training.rows, ]
-max.test <- max.seq[max.test.rows, ]
-
-#bind together 
-svm.training.data <- rbind(jund.training, max.training)
-svm.test.data <- rbind(jund.test, max.test)
-
-#run svm 
-library(kernlab)
-svm.res <- ksvm(protein ~ ., data = svm.training.data)
-
-#predict on test data 
-predictions <- predict(svm.res, svm.test.data[ , colnames(svm.test.data != "protein")])
-
-table(predictions, svm.test.data$protein)
-
-
-
-
-
-#get chip-seq for GM12878 cell line and PAX5 protein
-#arbitrarilly grabbing first experiment 
-gr.chip <- query(ah, c("GM12878", "PAX5","Tfbs", "UniPk"))[[1]]
-if(grepl("hg19", metadata(gr.chip)$`Data Source`)){
-  
-  library("BSgenome.Hsapiens.UCSC.hg19")
-}
-
-#make widths of sequence the same 
-#for now choosing 260 bases
-
-#first subset out small peaks 
-target.peaks <- gr.chip[width(gr.chip) > 250, ]
-
-#get the middle of ranges with more than 250 peaks 
-new.seqs <- target.peaks - round((width(target.peaks) - 250)/2)
-new.seqs <- resize(new.seqs, 250)
-
-#extract sequences 
-seqs <- getSeq(Hsapiens, new.seqs)
-
-#split the peak strings
-seq.chars <- as.character(seqs)
-
-#go through each element and split it into indiviudal bases, make a matrix 
-seq.mat <- matrix(unlist(lapply(seq.chars, strsplit, split = "")), ncol = 250, byrow = TRUE)
-
-
-
-
-
-
-
-
-
-```
