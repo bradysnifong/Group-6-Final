@@ -226,6 +226,10 @@ lapply(names(svm.indiv.cell), function(protein.cell){
   plot(plot.data$rocdata, main = protein.cell ,col="red",lwd=2)
   
 })
+
+
+#save relevant objects 
+save(list = c('svm.indiv.cell', 'svm.combined.cell', 'exp.data.list', 'combined.cell.data.list'), file = "group6.results.RDA") 
 ```
 
 ```{r}
