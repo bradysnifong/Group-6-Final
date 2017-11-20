@@ -11,7 +11,7 @@ library(AnnotationHub)
 library(SummarizedExperiment)
 ah <- AnnotationHub()
 
-#PAX5 binding 
+#look at available chipseq data 
 pax5.experiments <- query(ah, c("PAX5", "Tfbs", "UniPk"))
 rest.experiments <- query(ah, c("REST", "Tfbs", "UniPk"))
 usf1.experiments <- query(ah, c("USF1", "Tfbs", "UniPk"))
@@ -19,6 +19,8 @@ max.experiments <- query(ah, c("MAX", "Tfbs", "UniPk"))
 jund.experiments <- query(ah, c("JUND", "Tfbs", "UniPk"))
 yy1.experiments <- query(ah, c("YY1", "Tfbs", "UniPk"))
 gabpa.experiments <- query(ah, c("GABPA", "Tfbs", "UniPk"))
+
+#most complete options are JUND, MAX, USF1, in H1hesc, Hepg2, GM12878, K562
 
 get.exp <- function(cell.line, protein){
   
@@ -202,5 +204,16 @@ lapply(names(svm.combined.cell), function(protein){
 plot(rocdata,main="Receiver Operating Characteristics",col="red",lwd=2)
 
 plot(pred.profile$predictionProfiles,sel=1,ylim=c(-0.05,0.05))
+
+```
+```{r}
+
+#pull in open chromatin data 
+
+gm12878.dnase <- query(ah, c("GM12878", "dnase", "UniPk"))[[1]]
+h1hesc.dnase <- query(ah, c("H1HESC", "dnase", "UniPk"))[[1]]
+hepg2.dnase <- query(ah, c("HEPG2", "dnase", "UniPk"))[[1]]
+k562.dnase <- query(ah, c("k562", "dnase", "UniPk"))[[1]]
+
 
 ```
