@@ -8,6 +8,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 library(rtracklayer)
 library(AnnotationHub)
+library(SummarizedExperiment)
 ah <- AnnotationHub()
 
 #PAX5 binding 
@@ -35,150 +36,171 @@ get.exp <- function(cell.line, protein){
 }
 
 library("BSgenome.Hsapiens.UCSC.hg19")
-extract.seq <- function(exp.data, protein){
+
+#function to extract dna stringset from 
+extract.seq <- function(exp.data, subset = TRUE){
   
-  #make widths of sequence the same 
-  #per paper, use 100 bp
-
-  #first subset out small peaks 
-  target.peaks <- exp.data[width(exp.data) > 100, ]
-
-  #get the middle of ranges with more than 250 peaks 
-  new.seqs <- target.peaks - round((width(target.peaks) - 100)/2)
-  new.seqs <- resize(new.seqs, 100)
+  if (subset){
+    
+    #make widths of sequence the same 
+    #per paper, use 100 bp
+  
+    #first subset out small peaks 
+    target.peaks <- exp.data[width(exp.data) > 100, ]
+  
+    #get the middle of ranges with more than 100 peaks 
+    exp.data <- target.peaks - round((width(target.peaks) - 100)/2)
+    exp.data <- resize(exp.data, 100)
+    
+  }
   
   #extract sequences 
-  seqs <- getSeq(Hsapiens, new.seqs)
-  
-  #make list of characters
-  seq.chars <- as.character(seqs)
-  
-  #go through each element and split it into indiviudal bases, make a matrix 
-  seq.df <- data.frame(matrix(unlist(lapply(seq.chars, strsplit, split = "")), ncol = 250, byrow = TRUE))
-  
-  #add in protein name 
-  seq.df$protein <- protein
-  return(seq.df)
+  seqs <- getSeq(Hsapiens, exp.data)
+  return(seqs)
   
 }
 
-#function to run svm on two proteins from same cell line 
-run.svm <- function(protein1, protein2, cell.line){
+
+#function to pull down data for a single cell line and protein
+#and put it together into a useable dnastring set and vector 
+#of binding site vs non-binding predictions 
+format.exp.data <- function(protein, cell.line){
   
-  #pull down data 
-  protein1.chip <- get.exp(cell.line, protein1)
-  protein2.chip <- get.exp(cell.line, protein2)
-  protein1.diffs <- setdiff(protein1.chip, protein2.chip)
-  protein2.diffs <- setdiff(protein2.chip, protein1.chip)
+     #pull down data for protein and cell line 
+    exp.data <- get.exp(protein, cell.line)
+    
+    #subset to top 1000 of 100 bp per paper instructions 
+    top.peaks <- exp.data[width(exp.data) > 100, ]
+    top.peaks <- top.peaks[order(-top.peaks$signalValue), ]
+    top.peaks <- top.peaks[1:1000, ]
+    
+    #get 100 bp flanking regions sampled 200 bp away
+    flank.regions <- flank(top.peaks + 200, 100)
+    
+    #extract sequence for target peaks and flanks 
+    binding.seqs <- extract.seq(top.peaks)
+    non.binding.seqs <- extract.seq(flank.regions, subset = F)
+    
+    #concatenate 
+    combined.seqs <- c(binding.seqs, non.binding.seqs)
+    
+    #make vector of binding site classification 
+    #1 for tf binding, -1 for non-binding 
+    tf.binding <- c(rep(1, length(binding.seqs)), rep(-1, length(non.binding.seqs)))
   
-  #get dfs for protein1 and protein2 
-  protein1.seq <- extract.seq(protein1.diffs, protein1)
-  protein2.seq <- extract.seq(protein2.diffs, protein2)
-  
-  #split into test and training sets
-  set.seed(14)
-  
-  protein1.training.rows <- sample(1:nrow(protein1.seq), round(nrow(protein1.seq)*.8))
-  protein1.test.rows <- setdiff(1:nrow(protein1.seq), protein1.training.rows)
-  protein1.training <- protein1.seq[protein1.training.rows, ]
-  protein1.test <- protein1.seq[protein1.test.rows, ]
-  
-  protein2.training.rows <- sample(1:nrow(protein2.seq), round(nrow(protein2.seq)*.8))
-  protein2.test.rows <- setdiff(1:nrow(protein2.seq), protein2.training.rows)
-  protein2.training <- protein2.seq[protein2.training.rows, ]
-  protein2.test <- protein2.seq[protein2.test.rows, ]
-  
-  #bind together 
-  svm.training.data <- rbind(protein1.training, protein2.training)
-  svm.test.data <- rbind(protein1.test, protein2.test)
-  
-  #run svm 
-  library(kernlab)
-  svm.res <- ksvm(protein ~ ., data = svm.training.data)
-  
-  #predict on test data 
-  predictions <- predict(svm.res, svm.test.data[ , colnames(svm.test.data != "protein")])
-  
-  return(list(observed = svm.test.data$protein, predicted = predictions))
+    #return string set and tf.binding vector 
+    return(list(sequences = combined.seqs, tf.binding = tf.binding))
   
 }
 
-test <- run.svm("JUND", "MAX", "GM12878")
 
+#specify target proteins and cells 
+target.proteins <- rep(c("JUND", "MAX", "USF1"), each = 4)
+target.cells <- rep(c("H1HESC", "HEPG2", "GM12878", "K562"), 3)
 
-#pull down data 
-jund.chip <- get.exp("GM12878", "JUND")
-max.chip <- get.exp("GM12878", "MAX")
-jund.diffs <- setdiff(jund.chip, max.chip)
-max.diffs <- setdiff(max.chip, jund.chip)
+#pull in data 
+library(BiocParallel)
+param <- bpparam()
+bpworkers(param) <- 5
+exp.data.list <- bpmapply(format.exp.data, target.proteins, target.cells, BPPARAM = param, SIMPLIFY = F)
 
-#get dfs for jund and max 
-jund.seq <- extract.seq(jund.diffs, "jund")
-max.seq <- extract.seq(max.diffs, "max")
+#name the elements of the list 
+names(exp.data.list) <- paste(target.proteins, target.cells)
 
-#split into test and training sets
-set.seed(14)
-
-jund.training.rows <- sample(1:nrow(jund.seq), round(nrow(jund.seq)*.8))
-jund.test.rows <- setdiff(1:nrow(jund.seq), jund.training.rows)
-jund.training <- jund.seq[jund.training.rows, ]
-jund.test <- jund.seq[jund.test.rows, ]
-
-max.training.rows <- sample(1:nrow(max.seq), round(nrow(max.seq)*.8))
-max.test.rows <- setdiff(1:nrow(max.seq), max.training.rows)
-max.training <- max.seq[max.training.rows, ]
-max.test <- max.seq[max.test.rows, ]
-
-#bind together 
-svm.training.data <- rbind(jund.training, max.training)
-svm.test.data <- rbind(jund.test, max.test)
-
-#run svm 
-library(kernlab)
-svm.res <- ksvm(protein ~ ., data = svm.training.data)
-
-#predict on test data 
-predictions <- predict(svm.res, svm.test.data[ , colnames(svm.test.data != "protein")])
-
-table(predictions, svm.test.data$protein)
-
-
-
-
-
-#get chip-seq for GM12878 cell line and PAX5 protein
-#arbitrarilly grabbing first experiment 
-gr.chip <- query(ah, c("GM12878", "PAX5","Tfbs", "UniPk"))[[1]]
-if(grepl("hg19", metadata(gr.chip)$`Data Source`)){
+#make another list by combining protein data across cell types 
+combined.cell.data.list <- lapply(unique(target.proteins), function(protein){
   
-  library("BSgenome.Hsapiens.UCSC.hg19")
+  protein.cell.data <- exp.data.list[grep(protein, names(exp.data.list))]
+  combined.cell.data <- Reduce(function(...) mapply(c, ...), protein.cell.data)
+  return(combined.cell.data)
+  
+})
+names(combined.cell.data.list) <- unique(target.proteins)
+
+#function to run svm and get information on binding site prediction 
+run.svm <- function(combined.seqs, tf.binding){
+  
+  #set kernel 
+  #this is not the precise kernel used in the paper 
+  #but seems similar, is avaialable in this package, and is from the same
+  #author of the paper 
+  
+  #note: using k = 8 and and m = 2 per paper 
+  mismatch.kern <- mismatchKernel(k=8,m=2)
+  
+  #get training and test data 
+  n.samples <- length(tf.binding)
+  training.obs <-sample(1:n.samples, 0.7*n.samples)
+  test.obs <-c(1:n.samples)[-training.obs]
+  
+  #run svm on test data 
+  exrep<-getExRep(combined.seqs, mismatch.kern, sparse=FALSE)
+  svm.model <- kbsvm(x = exrep[training.obs, ], y = tf.binding[training.obs], kernel = mismatch.kern)
+  
+  #look at accuracy 
+  pred.profile <- predict(svm.model, combined.seqs[test.obs], predProfiles = T)
+  svm.predictions <- predict( svm.model, exrep[test.obs, ])
+  svm.decisions <- predict(svm.model, exrep[test.obs, ], predictionType = "decision")
+  eval.data <- evaluatePrediction( svm.predictions, tf.binding[test.obs], allLabels = unique(tf.binding), decValues = svm.decisions, print = F)
+  
+  #get auc
+  rocdata<-computeROCandAUC(svm.decisions, tf.binding[test.obs], unique(tf.binding))
+  return(list(rocdata = rocdata, pred.profile = pred.profile, eval.data = eval.data))
+  
 }
 
-#make widths of sequence the same 
-#for now choosing 260 bases
+#run svm
+library(kebabs)
 
-#first subset out small peaks 
-target.peaks <- gr.chip[width(gr.chip) > 250, ]
+#first on cell specific data
+svm.indiv.cell <- bplapply(exp.data.list, function(cell.protein.data){
+  
+    run.svm(cell.protein.data$sequences, cell.protein.data$tf.binding)
+  
+}, BPPARAM = param)
+names(svm.indiv.cell) <- names(exp.data.list)
 
-#get the middle of ranges with more than 250 peaks 
-new.seqs <- target.peaks - round((width(target.peaks) - 250)/2)
-new.seqs <- resize(new.seqs, 250)
+#then on protein data combined across cell types 
+svm.combined.cell <- bplapply(combined.cell.data.list, function(comb.cell.data){
+  
+    run.svm(comb.cell.data$sequences, comb.cell.data$tf.binding)
+  
+}, BPPARAM = param)
 
-#extract sequences 
-seqs <- getSeq(Hsapiens, new.seqs)
+names(svm.combined.cell) <- names(combined.cell.data.list)
 
-#split the peak strings
-seq.chars <- as.character(seqs)
+#plot ROC curves for each 
+graphics.off()
+par("mar")
+par(mar=c(1,1,1,1))
+par(mfrow = c(6,2))
+lapply(names(svm.indiv.cell), function(protein.cell){
+  
+  #plotting options 
+  
+  plot.data <- svm.indiv.cell[[protein.cell]]
+  plot(plot.data$rocdata, main = protein.cell ,col="red",lwd=2)
+  
+})
+```
 
-#go through each element and split it into indiviudal bases, make a matrix 
-seq.mat <- matrix(unlist(lapply(seq.chars, strsplit, split = "")), ncol = 250, byrow = TRUE)
+```{r}
+#also for combined cell results 
+graphics.off()
+par("mar")
+par(mar=c(1,1,1,1))
+par(mfrow = c(3,1))
+lapply(names(svm.combined.cell), function(protein){
+  
+  plot.data <- svm.combined.cell[[protein]]
+  plot(plot.data$rocdata, main = protein ,col="red",lwd=2)
+  
+})
 
 
+#plotting options 
+plot(rocdata,main="Receiver Operating Characteristics",col="red",lwd=2)
 
-
-
-
-
-
+plot(pred.profile$predictionProfiles,sel=1,ylim=c(-0.05,0.05))
 
 ```
