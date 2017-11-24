@@ -1,0 +1,375 @@
+---
+title: "final project.rmd"
+author: Brady Nifong, Mike Nodzenski, Fan Zhou
+output: html_document
+---
+
+```{r global_options, include=FALSE}
+
+#get rid of warnings and package loading messages 
+knitr::opts_chunk$set(warning=FALSE, message=FALSE)
+```
+
+## Introduction 
+
+
+## Methods 
+
+
+##Results 
+
+```{r, include=FALSE}
+
+#prelimnary investigation of available data
+library(rtracklayer)
+library(AnnotationHub)
+library(SummarizedExperiment)
+#ah <- AnnotationHub()
+
+#look at available chipseq data for proteins from the paper 
+#pax5.experiments <- query(ah, c("PAX5", "Tfbs", "UniPk"))
+#rest.experiments <- query(ah, c("REST", "Tfbs", "UniPk"))
+#usf1.experiments <- query(ah, c("USF1", "Tfbs", "UniPk"))
+#max.experiments <- query(ah, c("MAX", "Tfbs", "UniPk"))
+#jund.experiments <- query(ah, c("JUND", "Tfbs", "UniPk"))
+#yy1.experiments <- query(ah, c("YY1", "Tfbs", "UniPk"))
+#gabpa.experiments <- query(ah, c("GABPA", "Tfbs", "UniPk"))
+
+#most complete options are JUND, MAX, USF1, in H1hesc, Hepg2, GM12878, K562
+
+```
+
+```{r, include = F}
+
+##writing functions to process and run svm on binding sites for proteins and 
+##cell lines referenced above 
+
+
+#1. function to pull summarized experiment for cell line a protein
+get.exp <- function(cell.line, protein){
+  
+  cell.protein.query <- query(ah, c(cell.line, protein, "Tfbs", "UniPk"))
+  if (length(cell.protein.query) == 0){
+    
+    print(paste("No matches for", paste(cell.line, protein)))
+    
+  }
+  if( length(cell.protein.query) > 0){
+    
+    query(ah, c(cell.line, protein,"Tfbs", "UniPk"))[[1]]
+    
+  }
+}
+
+library("BSgenome.Hsapiens.UCSC.hg19")
+
+#2. function to extract dna stringset from summarized experiment  
+extract.seq <- function(exp.data, subset = TRUE){
+  
+  if (subset){
+    
+    #make widths of sequence the same 
+    #per paper, use 100 bp
+  
+    #first subset out small peaks 
+    target.peaks <- exp.data[width(exp.data) > 100, ]
+  
+    #get the middle of ranges with more than 100 peaks 
+    exp.data <- target.peaks - round((width(target.peaks) - 100)/2)
+    exp.data <- resize(exp.data, 100)
+    
+  }
+  
+  #extract sequences 
+  seqs <- getSeq(Hsapiens, exp.data)
+  return(seqs)
+  
+}
+
+
+#3. function that combines previous two functions to pull down 
+#data for a single cell line and protein
+#and put it together into a useable dna stringset and vector 
+#of binding site vs non-binding predictions
+
+format.exp.data <- function(protein, cell.line){
+  
+     #pull down data for protein and cell line 
+    exp.data <- get.exp(protein, cell.line)
+    
+    #subset to top 1000 of 100 bp per paper instructions 
+    top.peaks <- exp.data[width(exp.data) > 100, ]
+    top.peaks <- top.peaks[order(-top.peaks$signalValue), ]
+    top.peaks <- top.peaks[1:1000, ]
+    
+    #get 100 bp flanking regions sampled 200 bp away
+    flank.regions <- flank(top.peaks + 200, 100)
+    
+    #extract sequence for target peaks and flanks 
+    binding.seqs <- extract.seq(top.peaks)
+    non.binding.seqs <- extract.seq(flank.regions, subset = F)
+    
+    #concatenate 
+    combined.seqs <- c(binding.seqs, non.binding.seqs)
+    
+    #make vector of binding site classification 
+    #1 for tf binding, -1 for non-binding 
+    tf.binding <- c(rep(1, length(binding.seqs)), rep(-1, length(non.binding.seqs)))
+  
+    #return string set and tf.binding vector 
+    return(list(sequences = combined.seqs, tf.binding = tf.binding))
+  
+}
+
+```
+
+```{r, include = F}
+
+##Actually run the above functions on target proteins and cells 
+
+#specify target proteins and cells 
+target.proteins <- rep(c("JUND", "MAX", "USF1"), each = 4)
+target.cells <- rep(c("H1HESC", "HEPG2", "GM12878", "K562"), 3)
+
+#pull in data 
+#note that this only works reasonably quickly by running jobs in parallel 
+#on MN's computer (4 core)
+
+#As a consequence, so this will compile on the computers of all 
+#group members, the parallel code that was used by MN to produce the results
+#(below) is commented out and saved results objects are loaded into the workspace 
+#instead. To be absolutely clear, the commented out code actually produced the 
+#results for this markdown. 
+
+################################
+##code used to produce results 
+################################
+
+###read in and format target cell/protein data
+
+##first for individual cells 
+
+#library(BiocParallel)
+#param <- bpparam()
+#bpworkers(param) <- 5
+#exp.data.list <- bpmapply(format.exp.data, target.proteins, target.cells, BPPARAM = param, SIMPLIFY = F)
+
+#name the elements of the list 
+#names(exp.data.list) <- paste(target.proteins, target.cells)
+
+##then combining acorss cell types
+
+##make another list by combining protein data across cell types 
+#combined.cell.data.list <- lapply(unique(target.proteins), function(protein){
+#  
+#  protein.cell.data <- exp.data.list[grep(protein, names(exp.data.list))]
+#  combined.cell.data <- Reduce(function(...) mapply(c, ...), protein.cell.data)
+#  return(combined.cell.data)
+#  
+#})
+#names(combined.cell.data.list) <- unique(target.proteins)
+
+#instead loading saved object produced by MN using the above commands
+library("RCurl")
+download.file("https://github.com/bradysnifong/Group-6-Final/blob/master/group6.results.RDA?raw=true", "project.data")
+load("project.data")
+
+```
+
+```{r, include = F}
+
+##Now writing functions to run svm to predict TF binding 
+
+run.svm <- function(combined.seqs, tf.binding){
+  
+  #set kernel 
+  #this is not the precise kernel used in the paper 
+  #but seems similar, is avaialable in this package, and is from the same
+  #author of the paper 
+  
+  #note: using k = 8 and and m = 2 per paper 
+  mismatch.kern <- mismatchKernel(k=8,m=2)
+  
+  #get training and test data 
+  n.samples <- length(tf.binding)
+  training.obs <-sample(1:n.samples, 0.7*n.samples)
+  test.obs <-c(1:n.samples)[-training.obs]
+  
+  #run svm on test data 
+  exrep<-getExRep(combined.seqs, mismatch.kern, sparse=FALSE)
+  svm.model <- kbsvm(x = exrep[training.obs, ], y = tf.binding[training.obs], kernel = mismatch.kern)
+  
+  #pull out feature weights 
+  fw <- svm.model@featureWeights
+  names(fw) <- svm.model@trainingFeatures
+  
+  #look at accuracy 
+  pred.profile <- predict(svm.model, combined.seqs[test.obs], predProfiles = T)
+  svm.predictions <- predict( svm.model, exrep[test.obs, ])
+  svm.decisions <- predict(svm.model, exrep[test.obs, ], predictionType = "decision")
+  eval.data <- evaluatePrediction( svm.predictions, tf.binding[test.obs], allLabels = unique(tf.binding), decValues = svm.decisions, print = F)
+  
+  #get auc
+  rocdata<-computeROCandAUC(svm.decisions, tf.binding[test.obs], unique(tf.binding))
+  return(list(rocdata = rocdata, pred.profile = pred.profile, eval.data = eval.data, fw = fw))
+  
+}
+
+```
+
+```{r, include = F}
+
+##Now actually run svm on the target cell lines and proteins 
+
+##As above, this requires paralllel processing, with only works on MN's computer 
+##Therefore, these commands are commented out, so the rmd will compile for 
+##all group members, but the code that produced the results is still clear
+
+##further note that these results objects were read into the workspace along 
+##with the processed experimental data in the download.file command above 
+
+library(kebabs)
+
+################################################################
+##first run svm to predict binding for cell-line specific data
+##################################################################
+
+#svm.indiv.cell <- bplapply(exp.data.list, function(cell.protein.data){
+  
+#    run.svm(cell.protein.data$sequences, cell.protein.data$tf.binding)
+  
+#}, BPPARAM = param)
+#names(svm.indiv.cell) <- names(exp.data.list)
+
+##########################################################
+#then run for each target protein combing data across cell
+#lines 
+###########################################################
+
+#svm.combined.cell <- bplapply(combined.cell.data.list, function(comb.cell.data){
+  
+#    run.svm(comb.cell.data$sequences, comb.cell.data$tf.binding)
+  
+#}, BPPARAM = param)
+
+#names(svm.combined.cell) <- names(combined.cell.data.list)
+
+
+#save relevant objects 
+#save(list = c('svm.indiv.cell', 'svm.combined.cell', 'exp.data.list', 'combined.cell.data.list'), file = "group6.results.RDA") 
+
+```
+
+```{r, include = F}
+
+###commamnds to examine results of svm 
+
+#first, grab the most predictive kmer from each svm model, 
+#where 'most predictive' is defined as the kmer with the highest feature weight, 
+#and compare to known binding motifs 
+
+best.kmers <- sapply(svm.indiv.cell, function(cell.protein){
+  
+  #grab results
+  fw <- cell.protein$fw
+  
+  #most predictive kmer
+  top.kmer <- names(fw)[fw == max(abs(fw))]
+  return(top.kmer)
+  
+})
+names(best.kmers) <- names(svm.indiv.cell)
+
+#using the best.kmers results, figures were manually created for presentation
+
+##pull in manually created figures 
+
+
+```
+
+
+
+#Most predictive sequence for JUND 
+
+![](https://github.com/bradysnifong/Group-6-Final/raw/master/JUND.PNG)
+
+
+
+#Most predictive sequence for MAX
+
+![](https://github.com/bradysnifong/Group-6-Final/raw/master/MAX.PNG)
+
+
+
+#Most predictive sequence for USF1
+
+![](https://github.com/bradysnifong/Group-6-Final/raw/master/USF1.PNG)
+
+
+```{r}
+
+##Now put together histograms of feature weights for each protein and cell line 
+##These may not be particularly informative, but do demonstrate that most features have 
+##little predictive value 
+
+#function to pull together feature weight data for a specified protein across all 4 cell lines 
+fw.df <-function(protein){
+  
+  target.results <- svm.indiv.cell[grep(protein, names(svm.indiv.cell))]
+  cell.names <- gsub(paste0(protein, " "), "", names(svm.indiv.cell)[grep(protein, names(svm.indiv.cell))])
+  fw.lengths <- sapply(target.results, function(x) length(x$fw))
+  stopifnot(length(unique(fw.lengths)) == 1)
+  cell.names <- rep(cell.names, each = unique(fw.lengths))
+  combined <- Reduce(function(...) mapply(c, ...), target.results)
+  plot.df <- data.frame(protein = protein, cell = cell.names, feature_weight = combined$fw)
+  return(plot.df)
+  
+}
+
+jund.fw.data <- fw.df("JUND")
+max.fw.data <- fw.df("MAX")
+usf1.fw.data <- fw.df("USF1")
+
+#plot feature weight histograms 
+library(ggplot2)
+ggplot(jund.fw.data, aes(x = feature_weight, fill = cell)) + geom_histogram(position = "dodge") + ggtitle("JUND Feature Weights")
+ggplot(max.fw.data, aes(x = feature_weight, fill = cell)) + geom_histogram(position = "dodge") + ggtitle("MAX Feature Weights")
+ggplot(usf1.fw.data, aes(x = feature_weight, fill = cell)) + geom_histogram(position = "dodge") + ggtitle("USF1 Feature Weights")
+```
+
+
+```{r, echo = F}
+
+##last, plot ROC curves 
+##perhaps not the most interesting figures, but AUC was a major source of emphasis
+##for the soure paper 
+
+#first, plot ROC curves for cell-lines individually 
+#graphics.off()
+par("mar")
+par(mar=c(1,1,1,1))
+par(mfrow = c(6,2))
+invisible(lapply(names(svm.indiv.cell), function(protein.cell){
+  
+  plot.data <- svm.indiv.cell[[protein.cell]]
+  plot(plot.data$rocdata, main = protein.cell ,col="red",lwd=2)
+  
+}))
+```
+
+
+```{r, echo = F}
+#Then plot for svm results run on combined cell-line results 
+#graphics.off()
+par("mar")
+par(mar=c(1,1,1,1))
+par(mfrow = c(3,1))
+invisible(lapply(names(svm.combined.cell), function(protein){
+  
+  plot.data <- svm.combined.cell[[protein]]
+  plot(plot.data$rocdata, main = protein ,col="red",lwd=2)
+  
+}))
+```
+
+
