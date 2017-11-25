@@ -1,5 +1,5 @@
 ---
-title: "final project.rmd"
+title: "Support Vector Machine Modeling of Transcription Factor Binding Sites"
 author: Brady Nifong, Mike Nodzenski, Fan Zhou
 output: html_document
 ---
@@ -14,16 +14,15 @@ knitr::opts_chunk$set(warning=FALSE, message=FALSE)
 
 ###Background 
 
-* Despite rapid improvements in high throuput sequencing technologies, the functional signficance of much of the human genome remains unclear.
+* Despite rapid improvements in high throughput sequencing technologies, the functional significance of much of the human genome remains unclear.
   
 * While protein coding regions have been well characterized, the majority of bases do not fall into this category. 
 
 * The ongoing Encyclopedia of DNA Elements (ENCODE) Project (1) seeks to address this issue. 
 
-* A key goal of the project is to more fully decribe the mechanisms of gene transcription. 
+* A key goal of the project is to more fully describe the mechanisms of gene transcription. 
     + Variety of techniques used including but not limited to: CHIP-seq (transcription factor binding), DNAse-seq (open chromatin)    
-    
-    +Our project focuses on CHIP-seq data from ENCODE
+    + Our project focuses on CHIP-seq data from ENCODE
   
 ###Motivating Study 
 
@@ -31,34 +30,89 @@ knitr::opts_chunk$set(warning=FALSE, message=FALSE)
 cell-type-specific transcription factor binding. Genome Res. 2012
 Sep;22(9):1723-34.
 
-* The Aim of this study was to predict cell type specific transcription factor (TF) binding using publicly available ENCODE data. 
+* The aim of this study was to predict cell type specific transcription factor (TF) binding using publicly available ENCODE data. 
 
-* Traditionally, this is done using MOTIF finding algorithms to identify high affinity sequence for a particular protein.
+* Traditionally, this is done using motif finding algorithms to identify high affinity sequence for a particular protein.
 
 * Arvey et al. argued support vector machine modeling (SVM) of TF binding more accurately predicts binding sites than traditional approaches.
 
 
-* They analyzed TF facrtor binding data for 286 CHIP-seq experiments of 67 transcriptional regulators, using Kmer SVM, and three motif finding approaches: MDScan, cERMIT, WeederK1. 
+* They analyzed TF factor binding data for 286 CHIP-seq experiments of 67 transcriptional regulators using Kmer SVM and three motif finding approaches: MDScan, cERMIT, WeederK1. 
     + Key feature of the Kmer SVM: string kernel developed by the authors specifically for these types of sequence data. 
     
     
-* Ultimately, they found the Kmer SVM approach more accurately predicted TF binding than the motif finding approaches, as assesed by area on the curve.  
+* Ultimately, they found the Kmer SVM approach more accurately predicted TF binding than the motif finding approaches, as assessed by area on the curve.  
 
 * They further investigated whether open chromatin and histone modifications played a role in cell specific TF binding. 
     + Found that open chromatin was a strong predictor of cell-specific binding. 
     
-### Our aims 
+### Our Aims 
     
 * Project of the scope of Arvey et al. (analysis of 286 experiments) was clearly not possible. 
 
-*Moreover, the motif finding approaches they used do not appear to be available through bioconductor. It's also not clear whether those algorithms can run on personal computers. 
+* Moreover, the motif finding approaches they used do not appear to be available through Bioconductor. It's also not clear whether those algorithms can run on personal computers. 
 
-* We dedcided to address a simplified question: Can we use SVM to accurately predict transcription factor binding in a subset of the cell lines and proteins investiagted by Arvey?
-
-
+* We chose to address a simplified question: Can we use SVM to accurately predict transcription factor binding in a subset of the cell lines and proteins investigated by Arvey?
 
 ## Methods 
 
+###Experiment Selection 
+
+* Queried AnnotationHub for CHIP-seq data the following proteins from Arvey et al.: PAX5, REST, USF1, MAX, JUND, YY1, GABPA 
+
+* Our goal was to choose proteins with experimental data across multiple cell lines.
+
+* Based on available data, we selected the following:
+
+* Proteins:
+
+    + JUND
+    + MAX
+    + USF1
+
+    
+* Cell Lines: 
+
+    + H1hesc
+    + Hepg2
+    + GM12878
+    + K562
+
+###Data Processing 
+
+Following the methods of Arvey et al. for all cell line/protein combinations:
+
+1. Selected the top 1000 CHIP-seq peaks by signal value.
+2. Extracted sequence for 100 bp region from each selected peak as a positive binding examples.  
+3. Used flanking 100-bp regions sampled 200 bp away as non-binding examples.
+
+###Support Vector Machine Modeling 
+
+* Initially ran models individually on specific cell line/protein combinations using SVM as implemented in the Kebabs Bioconductor package.
+
+    + Used DNA sequence to predict binding vs. non-binding status. 
+    + Sampled 70% of extracted sequence for training data. 
+    + Used the remaining 30% of data for testing. 
+    + Kernel used by Arvey et al. (to our knowledge) not available through Bioconductor or CRAN. Instead used mismatch kernel introduced by the senior author of Arvey et al. 
+    + Set parameters k = 8, m = 2, per Arvey et al. methods. 
+
+* Also ran models for protein binding pooling data across cell lines using the same approach (although not primarily interested in these results)
+  
+###Assessing SVM Accuracy 
+
+* Accuracy for all models is reported only for testing data
+
+1. Comparison to known transcription factor motifs 
+
+   * Pulled known protein binding motifs from the JASPAR database. 
+   * Extracted the kmer with the highest feature weight from the SVM (the most predictive kmer). 
+   * Compared to known motif. 
+   
+2. Area under the curve
+  
+  * This was a primary means of assessing model accuracy in Arvey et al. 
+  * Not as immediately interpretable as comparison to known motifs.
+  * Nevertheless, a useful secondary indicator of predictive ability. 
 
 ##Results 
 
@@ -239,7 +293,7 @@ run.svm <- function(combined.seqs, tf.binding){
   training.obs <-sample(1:n.samples, 0.7*n.samples)
   test.obs <-c(1:n.samples)[-training.obs]
   
-  #run svm on test data 
+  #run svm on training data 
   exrep<-getExRep(combined.seqs, mismatch.kern, sparse=FALSE)
   svm.model <- kbsvm(x = exrep[training.obs, ], y = tf.binding[training.obs], kernel = mismatch.kern)
   
@@ -333,24 +387,34 @@ names(best.kmers) <- names(svm.indiv.cell)
 
 
 
-#Most predictive sequence for JUND 
+#Comparison to JASPAR Motifs
+<br>
 
+## JUND:
+<br>
+<br>
 ![](https://github.com/bradysnifong/Group-6-Final/raw/master/JUND.PNG)
+<br>
+<br>
 
-
-
-#Most predictive sequence for MAX
-
+## MAX
+<br>
+<br>
 ![](https://github.com/bradysnifong/Group-6-Final/raw/master/MAX.PNG)
+<br>
+<br>
 
-
-
-#Most predictive sequence for USF1
-
+## USF1 
+<br>
+<br>
 ![](https://github.com/bradysnifong/Group-6-Final/raw/master/USF1.PNG)
+<br>
+<br>
 
-
-```{r}
+#Examination of Feature Weights 
+<br>
+<br>
+```{r, echo = F}
 
 ##Now put together histograms of feature weights for each protein and cell line 
 ##These may not be particularly informative, but do demonstrate that most features have 
@@ -381,7 +445,13 @@ ggplot(max.fw.data, aes(x = feature_weight, fill = cell)) + geom_histogram(posit
 ggplot(usf1.fw.data, aes(x = feature_weight, fill = cell)) + geom_histogram(position = "dodge") + ggtitle("USF1 Feature Weights")
 ```
 
+#Area Under the Curve 
+<br>
+<br>
 
+#Cell specific models:
+<br>
+<br>
 ```{r, echo = F}
 
 ##last, plot ROC curves 
@@ -389,8 +459,6 @@ ggplot(usf1.fw.data, aes(x = feature_weight, fill = cell)) + geom_histogram(posi
 ##for the soure paper 
 
 #first, plot ROC curves for cell-lines individually 
-#graphics.off()
-par("mar")
 par(mar=c(1,1,1,1))
 par(mfrow = c(6,2))
 invisible(lapply(names(svm.indiv.cell), function(protein.cell){
@@ -400,12 +468,14 @@ invisible(lapply(names(svm.indiv.cell), function(protein.cell){
   
 }))
 ```
+<br>
+<br>
 
-
+#Models pooling data across cell-lines 
+<br>
+<br>
 ```{r, echo = F}
 #Then plot for svm results run on combined cell-line results 
-#graphics.off()
-par("mar")
 par(mar=c(1,1,1,1))
 par(mfrow = c(3,1))
 invisible(lapply(names(svm.combined.cell), function(protein){
@@ -415,6 +485,29 @@ invisible(lapply(names(svm.combined.cell), function(protein){
   
 }))
 ```
+<br>
+<br> 
+
+#Conclusions 
+
+* SVM modeling of protein binding was extremely accurate in the cell lines and proteins we selected. 
+
+* Most strikingly, across proteins and cell lines, SVM very closely predicted known binding motifs. 
+
+* AUC was uniformly high within cell-lines, and extremely high when combining data across cell lines. 
+
+* Similar to Arvey et al., we did see that some proteins are easier to predict than others 
+  
+    + Namely, able to predict USF1 binding more easily than JUND, MAX.
+    
+* Also similar to Arvey, we saw variation in predictive ability among cell-lines within the same protein.
+
+    + For instance, predictions of JUND binding in K652 were more accurate than in H1hesc. 
+    + Patterns did not hold across proteins: predictions for MAX were more accurate in H1hesc than K652. 
+    + Points to other factors influencing cell specific binding (Arvey suggested one of these was open chromatin)
+  
+* Bottom line: given a protein with unknown binding motif, support vector machine modeling may be a useful tool in predicting its binding site. 
+
 
 ##References 
 
