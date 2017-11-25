@@ -10,7 +10,51 @@ output: html_document
 knitr::opts_chunk$set(warning=FALSE, message=FALSE)
 ```
 
-## Introduction 
+## Introduction
+
+###Background 
+
+* Despite rapid improvements in high throuput sequencing technologies, the functional signficance of much of the human genome remains unclear.
+  
+* While protein coding regions have been well characterized, the majority of bases do not fall into this category. 
+
+* The ongoing Encyclopedia of DNA Elements (ENCODE) Project (1) seeks to address this issue. 
+
+* A key goal of the project is to more fully decribe the mechanisms of gene transcription. 
+    + Variety of techniques used including but not limited to: CHIP-seq (transcription factor binding), DNAse-seq (open chromatin)    
+    
+    +Our project focuses on CHIP-seq data from ENCODE
+  
+###Motivating Study 
+
+> Arvey A, Agius P, Noble WS, Leslie C. Sequence and chromatin determinants of
+cell-type-specific transcription factor binding. Genome Res. 2012
+Sep;22(9):1723-34.
+
+* The Aim of this study was to predict cell type specific transcription factor (TF) binding using publicly available ENCODE data. 
+
+* Traditionally, this is done using MOTIF finding algorithms to identify high affinity sequence for a particular protein.
+
+* Arvey et al. argued support vector machine modeling (SVM) of TF binding more accurately predicts binding sites than traditional approaches.
+
+
+* They analyzed TF facrtor binding data for 286 CHIP-seq experiments of 67 transcriptional regulators, using Kmer SVM, and three motif finding approaches: MDScan, cERMIT, WeederK1. 
+    + Key feature of the Kmer SVM: string kernel developed by the authors specifically for these types of sequence data. 
+    
+    
+* Ultimately, they found the Kmer SVM approach more accurately predicted TF binding than the motif finding approaches, as assesed by area on the curve.  
+
+* They further investigated whether open chromatin and histone modifications played a role in cell specific TF binding. 
+    + Found that open chromatin was a strong predictor of cell-specific binding. 
+    
+### Our aims 
+    
+* Project of the scope of Arvey et al. (analysis of 286 experiments) was clearly not possible. 
+
+*Moreover, the motif finding approaches they used do not appear to be available through bioconductor. It's also not clear whether those algorithms can run on personal computers. 
+
+* We dedcided to address a simplified question: Can we use SVM to accurately predict transcription factor binding in a subset of the cell lines and proteins investiagted by Arvey?
+
 
 
 ## Methods 
@@ -171,8 +215,8 @@ target.cells <- rep(c("H1HESC", "HEPG2", "GM12878", "K562"), 3)
 
 #instead loading saved object produced by MN using the above commands
 library("RCurl")
-download.file("https://github.com/bradysnifong/Group-6-Final/blob/master/group6.results.RDA?raw=true", "project.data")
-load("project.data")
+download.file("https://github.com/bradysnifong/Group-6-Final/blob/master/group6.results.RDA?raw=true", "group6.results.RDA")
+load("group6.results.RDA")
 
 ```
 
@@ -372,4 +416,6 @@ invisible(lapply(names(svm.combined.cell), function(protein){
 }))
 ```
 
+##References 
 
+1. The ENCODE Project Consortium. An Integrated Encyclopedia of DNA Elements in the Human Genome. Nature. 2012;489(7414):57-74. doi:10.1038/nature11247.
