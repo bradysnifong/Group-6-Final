@@ -16,7 +16,21 @@ knitr::opts_chunk$set(warning=FALSE, message=FALSE)
 ## Methods 
 
 
-##Results 
+## Results
+
+[//]: (just jotting down my thoughts for the moment since the file won't knit and I am unable to see the graphs)
+- USF1 seems to be the best, though its relative
+- when looking at the MOTIF plot thing, it also looks like USF1 is the best
+- we cannot directly compare the plots of weights, but we see that their distributions are different.
+
+## Conclusions
+[//]: (still jotting down thoughts, may not include everything i wrote)
+- Note that we used different data then the paper - it would have been nice to have the same data so that we can compare directly
+-it would be nice to additionally add in open chromatin as a predictor in our svm model. However, in the function we used, we were unable to add a covariate to the model
+ 
+
+
+
 
 ```{r, include=FALSE}
 
@@ -172,7 +186,7 @@ target.cells <- rep(c("H1HESC", "HEPG2", "GM12878", "K562"), 3)
 #instead loading saved object produced by MN using the above commands
 library("RCurl")
 download.file("https://github.com/bradysnifong/Group-6-Final/blob/master/group6.results.RDA?raw=true", "project.data")
-load("project.data")
+load("group6.results.rda")
 
 ```
 
