@@ -22,15 +22,17 @@ Despite rapid improvements in high throughput sequencing technologies, the funct
 cell-type-specific transcription factor binding. Genome Res. 2012
 Sep;22(9):1723-34.
 
-The aim of the study described in Arvey et al. was to predict cell type specific transcription factor (TF) binding using publicly available ENCODE data. Traditionally, this is done using motif finding algorithms to identify high affinity sequence for a particular protein. Arvey et al. argued support vector machine modeling (SVM) of TF binding more accurately predicts binding sites than traditional approaches. The authors analyzed TF factor binding data for 286 CHIP-seq experiments of 67 transcriptional regulators using Kmer SVM and three motif finding approaches: MDScan, cERMIT, WeederK1. They developed a specific string kernel which works for these types of sequence data when applying the Kmer SVM model and ultimately found that the Kmer SVM approach could more accurately predicted TF binding than the motif finding approaches, as assessed by area on the curve. They further investigated whether open chromatin and histone modifications played a role in cell specific TF binding and proved that open chromatin was a strong predictor of cell-specific binding. 
+The aim of the study described in Arvey et al. was to predict cell type specific transcription factor (TF) binding using publicly available ENCODE data. Traditionally, this is done using motif finding algorithms to identify high affinity sequence for a particular protein. Arvey et al. argued support vector machine modeling (SVM) of TF binding more accurately predicts binding sites than traditional approaches. The authors analyzed TF factor binding data for 286 CHIP-seq experiments of 67 transcriptional regulators using Kmer SVM and three motif finding approaches: MDScan, cERMIT, WeederK1. They developed a string kernel specifically tailored to these types of sequence data when applying Kmer SVM models and ultimately found that this approach more accurately predicted TF binding than motif finding as assessed by area on the curve. They further investigated whether open chromatin and histone modifications played a role in cell specific TF binding and found that open chromatin was a strong predictor of cell-specific binding. 
     
 ### Our Aims 
-Obviously, it is impossible to completely reproduce all the results in Arvey et al. since their analysis contains 286 experiments. Moreover, the motif finding approaches they used do not appear to be available through Bioconductor. It's also not clear whether those algorithms can run on personal computers. Therefore, we simplified their study design to see if we can use SVM to accurately predict transcription factor binding in a subset of the cell lines and proteins investigated in the paper. 
+
+Given the time and resource limitations of this project, it was not possible to completely reproduce all results in Arvey et al. since their analysis contained 286 experiments. Moreover, we also could not reproduce their motif finding results because they algorithms they implemented are not currently available through Bioconductor. Therefore, we simplified their study design and sought to use SVM to accurately predict transcription factor binding in a subset of the cell lines and proteins investigated in the paper. 
 
 ## Methods 
 
 ###Experiment Selection 
-We queried AnnotationHub for CHIP-seq data seven proteins PAX5, REST, USF1, MAX, JUND, YY1, GABPA, which are mentioned in Arvey et al.. Since our goal was to choose proteins with experimental data across multiple cell lines, based on the available data we eventually selected out three proteins: JUND, MAX, USF1 and paid attention to four cell lines: H1hesc, Hepg2, GM12878, K562. 
+
+We queried AnnotationHub for CHIP-seq data seven proteins PAX5, REST, USF1, MAX, JUND, YY1, GABPA, which are mentioned in Arvey et al.. Since our goal was to choose proteins with experimental data across multiple cell lines, based on the available data we eventually selected three proteins: JUND, MAX, USF1 with experimental data across four cell lines: H1hesc, Hepg2, GM12878, K562. 
 
 
 ```{r message=FALSE, warning=FALSE}
@@ -56,10 +58,10 @@ library(SummarizedExperiment)
 
 ###Data Processing 
 
-Following the methods of Arvey et al, we applied a three-step processing procedure for all cell line/protein combinations:
+Following the methods of Arvey et al, we applied a three-step processing procedure to the data for all cell line/protein combinations:
 
 1. Selected the top 1000 CHIP-seq peaks by signal value.
-2. Extracted sequence for 100 bp region from each selected peak as a positive binding examples.  
+2. Extracted sequence for 100 bp region from each selected peak as a positive binding example.  
 3. Used flanking 100-bp regions sampled 200 bp away as non-binding examples.
 
 
@@ -149,10 +151,11 @@ format.exp.data <- function(protein, cell.line){
 
 ###Support Vector Machine Modeling 
 
-We initially ran models individually on specific cell line/protein combinations by the SVM function implemented in the Kebabs Bioconductor package to predict binding status using DNA sequence. Specifically, we split the data into two parts, where 70% of extracted sequences are randomly selected to build the training data while the remaining 30% form the testing set to validate the prediction accuracy of the trained model. Kernel used by Arvey et al. (to our knowledge) is not available through Bioconductor or CRAN. Therefore, we used a mismatch kernel introduced by the senior author of Arvey et al. instead and set the parameters to be k = 8, m = 2. We also ran models for protein binding pooling data across cell lines using the same approach as comparison.
+We initially ran models individually on specific cell line/protein combinations using the SVM function implemented in the Kebabs Bioconductor package to predict binding status using DNA sequence. Specifically, we sampled 70% of extracted sequences as training data and the remaining 30% formed the testing set to validate the prediction accuracy of the trained model. Unfortunately, the string kernel from Arvey et al. is not available through Bioconductor or CRAN. Instead, we substituted a similar mismatch kernel from the Kebabs package, which was introduced by the same research group, with tuning parameters k and m set to 8 and 2, respectively. We also ran models for protein binding pooling data across cell lines using the same approach to assess whether combining data improved prediction.
   
 ###Assessing SVM Accuracy 
-We apply the trained model onto the testing data and report the prediction accuracy with different combinations of proteins and cell lines. Known protein binding motifs from the JASPAR database were pulled out to compare with the most predicted kmer with the highest feature weight by our SVM model. AUC (Area under the curve) is used to assess model accuracy, which is the primary performance measurement in Arvey et al. It is not as immediately interpretable as comparison to known motifs, but a useful secondary indicator of predictive ability.
+
+We assessed SVM accuracy in two ways. First, we identified the most predictive kmer from each model as the sequence with the largest absolute feature weight, and compared this to known protein binding motifs from the JASPAR database. In doing so, we hoped established the biological plausibility of our results. Second, we used the AUC (Area under the curve) of each SVM on the testing data to assess model accuracy. This was the primary performance measurement in Arvey et al., and while it is not as biologically interpretable as comparison to known motifs, it is a useful secondary indicator of predictive ability.
 
 ```{r message=FALSE, warning=FALSE}
 
@@ -322,7 +325,7 @@ names(best.kmers) <- names(svm.indiv.cell)
 
 
 ### Comparison to JASPAR Motifs
-The following figures compare the JASPAR Motifs to the most predicivtive kmer (determined by having the largest absolute feature weight in the svm). We can see that the prediction of USF1 by our model has the highest consistency with the JASPAR motifs compared to the other two. However, the most predictive kmers for all three proteins were fairly close to the motifs, showing the prediction of the model is fairly accurate. JASPAR motifs are acquired based on certain data set, and it is possible that our model provides a more accurate results for the proteins and cell lines we selected. 
+The following figures display JASPAR Motifs (top) and the the most predictive kmer (bottom) for each cell-line/transcription factor combination. Across cell lines, USF1 has the highest consistency with JASPAR motifs compared to the other two proteins. However, the most predictive kmers for all three proteins were fairly close to the motifs, suggesting SVM is an accurate predictive approach. We also note that JASPAR motifs are not the definitive word on protein binding, so the mismatching bases are not necessarily indicative of inaccurate prediction.   
 
 <br>
 
@@ -355,7 +358,7 @@ The following figures compare the JASPAR Motifs to the most predicivtive kmer (d
 
 ### Examination of Feature Weights 
 
-The following three plots display the distribution of feature weights for each svm that was fitted. All the histograms are unimodal and centered tightly around zero. Though we cannot directly compare the three hisograms, it can be seen that a majority of the features for each preditive model provide little information towards predicting binding sites.
+The following three plots display the distribution of feature weights for each fitted svm. All histograms are unimodal and centered tightly around zero. Though we cannot directly compare the three histograms, the majority of features for each predictive model provide little information towards predicting binding sites.
 
 <br>
 
@@ -394,7 +397,7 @@ We plotted the sensitivity vs false positive rate and gave the AUC for each cell
 
 #### Cell specific models:
 
-In general, it appears that USF1 has the best sensitivity vs false positive plot as well as the best AUC for each cell line. The AUC that is best between JUND and MAX varies by cell-line. Similarly, the sensitivity vs false positive rate plot that is best between JUND and MAX varies by cell-line.
+In general, we predicted USF1 binding most accurately. These models had the best AUC across cell lines. Models were also very accurate for JUND and MAX, though there was more variability across cell lines. AUC was higher for JUND than MAX in some cell lines, but lower in others. 
 
 <br>
 
@@ -419,7 +422,7 @@ invisible(lapply(names(svm.indiv.cell), function(protein.cell){
 
 #### Models pooling data across cell-lines 
 
-When pooling the data across cell-lines we can see that once again USF1 has the best sensitivity vs false positive rate plot, as well as the best AUC. The AUC for MAX and JUND seems to be approximately the same across cell-lines, while the sensitivity vs false positive rate plot for MAX seems *slightly* better than the plot for JUND.
+Pooling data across cell-lines, USF1 still had the largest AUC, an almost perfect 0.997. AUC for MAX and JUND also remained high at nearly 0.95. In each case, the pooled data yielded more accurate prediction than cell-line specific data. 
 
 <br>
 ```{r message=FALSE, warning=FALSE}
@@ -436,10 +439,10 @@ invisible(lapply(names(svm.combined.cell), function(protein){
 <br>
 <br> 
 
-## Conclusions 
-Based on the results shown above, we are able to draw some conclusions. We cold see that our SVM modeling of protein binding was extremely accurate as the AUC values are above 90% for all the combinations of proteins and cell lines. The AUC was uniformly high within cell-lines, and extremely high when combining data across cell lines. Similar to Arvey et al., we did see that some proteins are easier to predict than others, for example, we were able to predict USF1 binding more easily as it had higher AUC values overall than JUND, MAX. Also similar to Arvey, we saw variation in predictive ability among cell-lines within the same protein. For instance, predictions of JUND binding in K652 were more accurate than in H1hesc. Patterns did not hold across proteins such as the predictions for MAX were more accurate in H1hesc than K652. These findings indicates that there may be other factors influencing the cell specific binding where one potential factor was the open chromatin as suggested by the paper. 
+## Discussion 
+SVM modeling very accurately predicted transcription factor binding in a subset of the proteins and cell lines from Arvey et al.. AUC values were above 89% for all cell-line specif models and above 94% for models pooling data across cell lines. Similar to Arvey et al., we found that some proteins are easier to predict than others. For example, we predicted USF1 binding more accurately than JUND and MAX, both within and across cell-lines, as indicated by higher AUC values. Also similar to Arvey, we saw variation in predictive ability among cell-lines within the same protein. For instance, predictions of JUND binding in K652 were more accurate than in H1hesc. Conversely, predictions for MAX were more accurate in H1hesc than K652. These findings indicate that there may be other factors influencing cell specific binding. Arvey et al. suggest this may be open chromatin. 
 
-Let it be noted that we could not reproduce all the results in Arvey et al because we only focus on three proteins and four cell lines while they did 286 experiments. We also used a different kernel for the SVM function which is available in the Kebabs package but we could produce similar results to the paper. Lastly, we would have liked to use open chromatin as a predictor in our svm model to see if we could get a better fit. However, the function we used to create out model did not allow for covariates. Even with these the limitations, we conclude that given a protein with unknown binding motif, support vector machine modeling may be a useful tool in predicting its binding site and achieve an acceptable prediction accuracy.  
+Our project has limitations. We could not directly reproduce the results in Arvey et al. because we focused on a small subset of their data. We also used a different kernel for SVM modeling. Furthermore, we were unable to assess the predictive value of open chromatin on transcription factor binding since the SVM implemented in Kebabs does not allow for covariates. Nevertheless, we conclude that support vector machine modeling achieves an acceptable prediction accuracy and may be a useful tool in predicting the binding sites of proteins with unknown motifs.  
 
 ##References 
 
