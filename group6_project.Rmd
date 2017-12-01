@@ -1,0 +1,446 @@
+---
+title: "Support Vector Machine Modeling of Transcription Factor Binding Sites"
+author: Brady Nifong, Mike Nodzenski, Fan Zhou
+output: html_document
+---
+
+```{r global_options, include=FALSE}
+
+#get rid of warnings and package loading messages 
+knitr::opts_chunk$set(warning=FALSE, message=FALSE)
+```
+
+## Introduction
+
+###Background 
+
+Despite rapid improvements in high throughput sequencing technologies, the functional significance of much of the human genome remains unclear. While protein coding regions have been well characterized, the majority of bases do not fall into this category. The ongoing Encyclopedia of DNA Elements (ENCODE) Project (1) seeks to address this issue. A key goal of the project is to more fully describe the mechanisms of gene transcription. Variety of techniques are used in the projects including but not limited to CHIP-seq (transcription factor binding) and DNAse-seq (open chromatin). Our project will focus on CHIP-seq data from ENCODE. 
+  
+###Motivating Study 
+
+> Arvey A, Agius P, Noble WS, Leslie C. Sequence and chromatin determinants of
+cell-type-specific transcription factor binding. Genome Res. 2012
+Sep;22(9):1723-34.
+
+The aim of the study described in Arvey et al. was to predict cell type specific transcription factor (TF) binding using publicly available ENCODE data. Traditionally, this is done using motif finding algorithms to identify high affinity sequence for a particular protein. Arvey et al. argued support vector machine modeling (SVM) of TF binding more accurately predicts binding sites than traditional approaches. The authors analyzed TF factor binding data for 286 CHIP-seq experiments of 67 transcriptional regulators using Kmer SVM and three motif finding approaches: MDScan, cERMIT, WeederK1. They developed a specific string kernel which works for these types of sequence data when applying the Kmer SVM model and ultimately found that the Kmer SVM approach could more accurately predicted TF binding than the motif finding approaches, as assessed by area on the curve. They further investigated whether open chromatin and histone modifications played a role in cell specific TF binding and proved that open chromatin was a strong predictor of cell-specific binding. 
+    
+### Our Aims 
+Obviously, it is impossible to completely reproduce all the results in Arvey et al. since their analysis contains 286 experiments. Moreover, the motif finding approaches they used do not appear to be available through Bioconductor. It's also not clear whether those algorithms can run on personal computers. Therefore, we simplified their study design to see if we can use SVM to accurately predict transcription factor binding in a subset of the cell lines and proteins investigated in the paper. 
+
+## Methods 
+
+###Experiment Selection 
+We queried AnnotationHub for CHIP-seq data seven proteins PAX5, REST, USF1, MAX, JUND, YY1, GABPA, which are mentioned in Arvey et al.. Since our goal was to choose proteins with experimental data across multiple cell lines, based on the available data we eventually selected out three proteins: JUND, MAX, USF1 and paid attention to four cell lines: H1hesc, Hepg2, GM12878, K562. 
+
+###Data Processing 
+
+Following the methods of Arvey et al, we applied a three-step processing procedure for all cell line/protein combinations:
+
+1. Selected the top 1000 CHIP-seq peaks by signal value.
+2. Extracted sequence for 100 bp region from each selected peak as a positive binding examples.  
+3. Used flanking 100-bp regions sampled 200 bp away as non-binding examples.
+
+###Support Vector Machine Modeling 
+
+We initially ran models individually on specific cell line/protein combinations by the SVM function implemented in the Kebabs Bioconductor package to predict binding status using DNA sequence. Specifically, we split the data into two parts, where 70% of extracted sequences are randomly selected to build the training data while the remaining 30% form the testing set to validate the prediction accuracy of the trained model. Kernel used by Arvey et al. (to our knowledge) is not available through Bioconductor or CRAN. Therefore, we used a mismatch kernel introduced by the senior author of Arvey et al. instead and set the parameters to be k = 8, m = 2. We also ran models for protein binding pooling data across cell lines using the same approach as comparison.
+  
+###Assessing SVM Accuracy 
+We apply the trained model onto the testing data and report the prediction accuracy with different combinations of proteins and cell lines. Known protein binding motifs from the JASPAR database were pulled out to compare with the most predicted kmer with the highest feature weight by our SVM model. AUC (Area under the curve) is used to assess model accuracy, which is the primary performance measurement in Arvey et al. It is not as immediately interpretable as comparison to known motifs, but a useful secondary indicator of predictive ability.
+
+```{r message=FALSE, warning=FALSE}
+
+#prelimnary investigation of available data
+library(rtracklayer)
+library(AnnotationHub)
+library(SummarizedExperiment)
+#ah <- AnnotationHub()
+
+#look at available chipseq data for proteins from the paper 
+#pax5.experiments <- query(ah, c("PAX5", "Tfbs", "UniPk"))
+#rest.experiments <- query(ah, c("REST", "Tfbs", "UniPk"))
+#usf1.experiments <- query(ah, c("USF1", "Tfbs", "UniPk"))
+#max.experiments <- query(ah, c("MAX", "Tfbs", "UniPk"))
+#jund.experiments <- query(ah, c("JUND", "Tfbs", "UniPk"))
+#yy1.experiments <- query(ah, c("YY1", "Tfbs", "UniPk"))
+#gabpa.experiments <- query(ah, c("GABPA", "Tfbs", "UniPk"))
+
+#most complete options are JUND, MAX, USF1, in H1hesc, Hepg2, GM12878, K562
+
+```
+
+```{r message=FALSE, warning=FALSE}
+
+##writing functions to process and run svm on binding sites for proteins and 
+##cell lines referenced above 
+
+
+#1. function to pull summarized experiment for cell line a protein
+get.exp <- function(cell.line, protein){
+  
+  cell.protein.query <- query(ah, c(cell.line, protein, "Tfbs", "UniPk"))
+  if (length(cell.protein.query) == 0){
+    
+    print(paste("No matches for", paste(cell.line, protein)))
+    
+  }
+  if( length(cell.protein.query) > 0){
+    
+    query(ah, c(cell.line, protein,"Tfbs", "UniPk"))[[1]]
+    
+  }
+}
+
+library("BSgenome.Hsapiens.UCSC.hg19")
+
+#2. function to extract dna stringset from summarized experiment  
+extract.seq <- function(exp.data, subset = TRUE){
+  
+  if (subset){
+    
+    #make widths of sequence the same 
+    #per paper, use 100 bp
+  
+    #first subset out small peaks 
+    target.peaks <- exp.data[width(exp.data) > 100, ]
+  
+    #get the middle of ranges with more than 100 peaks 
+    exp.data <- target.peaks - round((width(target.peaks) - 100)/2)
+    exp.data <- resize(exp.data, 100)
+    
+  }
+  
+  #extract sequences 
+  seqs <- getSeq(Hsapiens, exp.data)
+  return(seqs)
+  
+}
+
+
+#3. function that combines previous two functions to pull down 
+#data for a single cell line and protein
+#and put it together into a useable dna stringset and vector 
+#of binding site vs non-binding predictions
+
+format.exp.data <- function(protein, cell.line){
+  
+     #pull down data for protein and cell line 
+    exp.data <- get.exp(protein, cell.line)
+    
+    #subset to top 1000 of 100 bp per paper instructions 
+    top.peaks <- exp.data[width(exp.data) > 100, ]
+    top.peaks <- top.peaks[order(-top.peaks$signalValue), ]
+    top.peaks <- top.peaks[1:1000, ]
+    
+    #get 100 bp flanking regions sampled 200 bp away
+    flank.regions <- flank(top.peaks + 200, 100)
+    
+    #extract sequence for target peaks and flanks 
+    binding.seqs <- extract.seq(top.peaks)
+    non.binding.seqs <- extract.seq(flank.regions, subset = F)
+    
+    #concatenate 
+    combined.seqs <- c(binding.seqs, non.binding.seqs)
+    
+    #make vector of binding site classification 
+    #1 for tf binding, -1 for non-binding 
+    tf.binding <- c(rep(1, length(binding.seqs)), rep(-1, length(non.binding.seqs)))
+  
+    #return string set and tf.binding vector 
+    return(list(sequences = combined.seqs, tf.binding = tf.binding))
+  
+}
+
+```
+
+```{r message=FALSE, warning=FALSE}
+
+##Actually run the above functions on target proteins and cells 
+
+#specify target proteins and cells 
+target.proteins <- rep(c("JUND", "MAX", "USF1"), each = 4)
+target.cells <- rep(c("H1HESC", "HEPG2", "GM12878", "K562"), 3)
+
+#pull in data 
+#note that this only works reasonably quickly by running jobs in parallel 
+#on MN's computer (4 core)
+
+#As a consequence, so this will compile on the computers of all 
+#group members, the parallel code that was used by MN to produce the results
+#(below) is commented out and saved results objects are loaded into the workspace 
+#instead. To be absolutely clear, the commented out code actually produced the 
+#results for this markdown. 
+
+################################
+##code used to produce results 
+################################
+
+###read in and format target cell/protein data
+
+##first for individual cells 
+
+#library(BiocParallel)
+#param <- bpparam()
+#bpworkers(param) <- 5
+#exp.data.list <- bpmapply(format.exp.data, target.proteins, target.cells, BPPARAM = param, SIMPLIFY = F)
+
+#name the elements of the list 
+#names(exp.data.list) <- paste(target.proteins, target.cells)
+
+##then combining acorss cell types
+
+##make another list by combining protein data across cell types 
+#combined.cell.data.list <- lapply(unique(target.proteins), function(protein){
+#  
+#  protein.cell.data <- exp.data.list[grep(protein, names(exp.data.list))]
+#  combined.cell.data <- Reduce(function(...) mapply(c, ...), protein.cell.data)
+#  return(combined.cell.data)
+#  
+#})
+#names(combined.cell.data.list) <- unique(target.proteins)
+
+#instead loading saved object produced by MN using the above commands
+library("RCurl")
+download.file("https://github.com/bradysnifong/Group-6-Final/blob/master/group6.results.RDA?raw=true", "project.data")
+load("group6.results.rda")
+
+```
+
+```{r message=FALSE, warning=FALSE}
+
+##Now writing functions to run svm to predict TF binding 
+
+run.svm <- function(combined.seqs, tf.binding){
+  
+  #set kernel 
+  #this is not the precise kernel used in the paper 
+  #but seems similar, is avaialable in this package, and is from the same
+  #author of the paper 
+  
+  #note: using k = 8 and and m = 2 per paper 
+  mismatch.kern <- mismatchKernel(k=8,m=2)
+  
+  #get training and test data 
+  n.samples <- length(tf.binding)
+  training.obs <-sample(1:n.samples, 0.7*n.samples)
+  test.obs <-c(1:n.samples)[-training.obs]
+  
+  #run svm on training data 
+  exrep<-getExRep(combined.seqs, mismatch.kern, sparse=FALSE)
+  svm.model <- kbsvm(x = exrep[training.obs, ], y = tf.binding[training.obs], kernel = mismatch.kern)
+  
+  #pull out feature weights 
+  fw <- svm.model@featureWeights
+  names(fw) <- svm.model@trainingFeatures
+  
+  #look at accuracy 
+  pred.profile <- predict(svm.model, combined.seqs[test.obs], predProfiles = T)
+  svm.predictions <- predict( svm.model, exrep[test.obs, ])
+  svm.decisions <- predict(svm.model, exrep[test.obs, ], predictionType = "decision")
+  eval.data <- evaluatePrediction( svm.predictions, tf.binding[test.obs], allLabels = unique(tf.binding), decValues = svm.decisions, print = F)
+  
+  #get auc
+  rocdata<-computeROCandAUC(svm.decisions, tf.binding[test.obs], unique(tf.binding))
+  return(list(rocdata = rocdata, pred.profile = pred.profile, eval.data = eval.data, fw = fw))
+  
+}
+
+```
+
+```{r message=FALSE, warning=FALSE}
+
+##Now actually run svm on the target cell lines and proteins 
+
+##As above, this requires paralllel processing, with only works on MN's computer 
+##Therefore, these commands are commented out, so the rmd will compile for 
+##all group members, but the code that produced the results is still clear
+
+##further note that these results objects were read into the workspace along 
+##with the processed experimental data in the download.file command above 
+
+library(kebabs)
+
+################################################################
+##first run svm to predict binding for cell-line specific data
+##################################################################
+
+#svm.indiv.cell <- bplapply(exp.data.list, function(cell.protein.data){
+  
+#    run.svm(cell.protein.data$sequences, cell.protein.data$tf.binding)
+  
+#}, BPPARAM = param)
+#names(svm.indiv.cell) <- names(exp.data.list)
+
+##########################################################
+#then run for each target protein combing data across cell
+#lines 
+###########################################################
+
+#svm.combined.cell <- bplapply(combined.cell.data.list, function(comb.cell.data){
+  
+#    run.svm(comb.cell.data$sequences, comb.cell.data$tf.binding)
+  
+#}, BPPARAM = param)
+
+#names(svm.combined.cell) <- names(combined.cell.data.list)
+
+
+#save relevant objects 
+#save(list = c('svm.indiv.cell', 'svm.combined.cell', 'exp.data.list', 'combined.cell.data.list'), file = "group6.results.RDA") 
+
+```
+
+```{r message=FALSE, warning=FALSE}
+
+###commamnds to examine results of svm 
+
+#first, grab the most predictive kmer from each svm model, 
+#where 'most predictive' is defined as the kmer with the highest feature weight, 
+#and compare to known binding motifs 
+
+best.kmers <- sapply(svm.indiv.cell, function(cell.protein){
+  
+  #grab results
+  fw <- cell.protein$fw
+  
+  #most predictive kmer
+  top.kmer <- names(fw)[fw == max(abs(fw))]
+  return(top.kmer)
+  
+})
+names(best.kmers) <- names(svm.indiv.cell)
+
+#using the best.kmers results, figures were manually created for presentation
+
+##pull in manually created figures 
+
+
+```
+
+## Results
+
+
+### Comparison to JASPAR Motifs
+The following figures compare the JASPAR Motifs to the most predicivtive kmer (determined by having the largest absolute feature weight in the svm). We can see that the prediction of USF1 by our model has the highest consistency with the JASPAR motifs compared to the other two, which partially validate the prediction accuracy of our model. JASPAR motifs are acquired based on certain data set, and it is possible that our model provides a more accurate results for the proteins and cell lines we selected. 
+
+<br>
+
+#### JUND:                             
+<br>
+<br>
+<div style="width:500px; height=600px">
+![](https://github.com/bradysnifong/Group-6-Final/raw/master/JUND.PNG)
+</div>
+<br>
+<br>
+
+#### MAX
+<br>
+<br>
+<div style="width:500px; height=600px">
+![](https://github.com/bradysnifong/Group-6-Final/raw/master/MAX.PNG)
+</div>
+<br>
+<br>
+
+#### USF1 
+<br>
+<br>
+<div style="width:500px; height=600px">
+![](https://github.com/bradysnifong/Group-6-Final/raw/master/USF1.PNG)
+</div>
+<br>
+<br>
+
+### Examination of Feature Weights 
+
+The following three plots display the distribution of feature weights for each svm that was fitted. All the histograms are unimodal and centered around zero. The histograms show that a majority of the features provide little information towards predicting binding sites.
+
+<br>
+
+```{r message=FALSE, warning=FALSE}
+
+##Now put together histograms of feature weights for each protein and cell line 
+##These may not be particularly informative, but do demonstrate that most features have 
+##little predictive value 
+
+#function to pull together feature weight data for a specified protein across all 4 cell lines 
+fw.df <-function(protein){
+  
+  target.results <- svm.indiv.cell[grep(protein, names(svm.indiv.cell))]
+  cell.names <- gsub(paste0(protein, " "), "", names(svm.indiv.cell)[grep(protein, names(svm.indiv.cell))])
+  fw.lengths <- sapply(target.results, function(x) length(x$fw))
+  stopifnot(length(unique(fw.lengths)) == 1)
+  cell.names <- rep(cell.names, each = unique(fw.lengths))
+  combined <- Reduce(function(...) mapply(c, ...), target.results)
+  plot.df <- data.frame(protein = protein, cell = cell.names, feature_weight = combined$fw)
+  return(plot.df)
+  
+}
+
+jund.fw.data <- fw.df("JUND")
+max.fw.data <- fw.df("MAX")
+usf1.fw.data <- fw.df("USF1")
+
+#plot feature weight histograms 
+library(ggplot2)
+ggplot(jund.fw.data, aes(x = feature_weight, fill = cell)) + geom_histogram(position = "dodge") + ggtitle("JUND Feature Weights")
+ggplot(max.fw.data, aes(x = feature_weight, fill = cell)) + geom_histogram(position = "dodge") + ggtitle("MAX Feature Weights")
+ggplot(usf1.fw.data, aes(x = feature_weight, fill = cell)) + geom_histogram(position = "dodge") + ggtitle("USF1 Feature Weights")
+```
+
+### Area Under the Curve (AUC)
+
+We plotted the sensitivity vs false positive rate and gave the AUC for each cell specific model, as well as pooling the data across cell-lines.
+
+#### Cell specific models:
+
+In general, it appears that USF1 has the best sensitivity vs false positive plot as well as the best AUC for each cell line. The AUC that is best between JUND and MAX varies by cell-line. Similarly, the sensitivity vs false positive rate plot that is best between JUND and MAX varies by cell-line.
+
+<br>
+
+```{r message=FALSE, warning=FALSE}
+
+##last, plot ROC curves 
+##perhaps not the most interesting figures, but AUC was a major source of emphasis
+##for the soure paper 
+
+#first, plot ROC curves for cell-lines individually 
+par(mar=c(1,1,1,1))
+par(mfrow = c(6,2))
+invisible(lapply(names(svm.indiv.cell), function(protein.cell){
+  
+  plot.data <- svm.indiv.cell[[protein.cell]]
+  plot(plot.data$rocdata, main = protein.cell ,col="red",lwd=2)
+  
+}))
+```
+<br>
+<br>
+
+#### Models pooling data across cell-lines 
+
+When pooling the data across cell-lines we can see that once again USF1 has the best sensitivity vs false positive rate plot, as well as the best AUC. The AUC for MAX and JUND seems to be approximately the same across cell-lines, while the sensitivity vs false positive rate plot for MAX seems *slightly* better than the plot for JUND.
+
+<br>
+```{r message=FALSE, warning=FALSE}
+#Then plot for svm results run on combined cell-line results 
+par(mar=c(1,1,1,1))
+par(mfrow = c(3,1))
+invisible(lapply(names(svm.combined.cell), function(protein){
+  
+  plot.data <- svm.combined.cell[[protein]]
+  plot(plot.data$rocdata, main = protein ,col="red",lwd=2)
+  
+}))
+```
+<br>
+<br> 
+
+## Conclusions 
+Based on the results shown above, we are able to draw some conclusions. First, we shoud admit that we could not reproduce all the results in Arvey et al because we only focus on three proteins and four cell lines while they did 286 experiments. We also used a different kernel for the SVM function which is available in the Kebabs package but we could produce similar results to the paper. We cold see that our SVM modeling of protein binding was extremely accurate as the AUC values are above 90% for all the combinations of proteins and cell lines. The AUC was uniformly high within cell-lines, and extremely high when combining data across cell lines, which is even higher than each individual combination. Similar to Arvey et al., we did see that some proteins are easier to predict than others, or to say we are able to predict USF1 binding more easily which has overall higher AUC values than JUND, MAX. Also similar to Arvey, we saw variation in predictive ability among cell-lines within the same protein. For instance, predictions of JUND binding in K652 were more accurate than in H1hesc. Patterns did not hold across proteins such as the predictions for MAX were more accurate in H1hesc than K652. These findings indicates that there may be other factors influencing the cell specific binding where one potential factor was the open chromatin as suggested by the paper. We would have liked to use open chromatin as a predictor in our svm model to see if we could get a better fit. However, the function we used to create out model did not allow for covariates, which may affect the prediction accuracy of our model. Though the limitations, we may still conclude that given a protein with unknown binding motif, support vector machine modeling may be a useful tool in predicting its binding site and achieve an acceptable prediction accuracy.  
+
+
+##References 
+
+1. The ENCODE Project Consortium. An Integrated Encyclopedia of DNA Elements in the Human Genome. Nature. 2012;489(7414):57-74. doi:10.1038/nature11247.
+
